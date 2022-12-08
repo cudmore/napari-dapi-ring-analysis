@@ -11,6 +11,9 @@ contributions:
     - id: napari-dapi-ring-analysis.make_func_widget
       python_name: napari_dapi_ring_analysis._widget:example_function_widget
       title: Make example function widget
+    - id: napari-dapi-ring-analysis.make_qwidget2
+      python_name: napari_dapi_ring_analysis.interface.oligoInterface:oligoInterface
+      title: Make example QWidget 2
   widgets:
     - command: napari-dapi-ring-analysis.make_qwidget
       display_name: Example QWidget
@@ -19,3 +22,5 @@ contributions:
     - command: napari-dapi-ring-analysis.make_func_widget
       autogenerate: true
       display_name: Example Function Widget
+    - command: napari-dapi-ring-analysis.make_qwidget2
+      display_name: Example QWidget 2
