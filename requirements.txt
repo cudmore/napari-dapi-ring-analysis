@@ -1,0 +1,9 @@
+# not used by napari cookiecutter
+# just for me to figure out required packages
+qdarkstyle
+#napari_layer_table
+tifffile
+aicsimageio
+aicspylibczi
+cellpose
+pyqtgraph
