@@ -4,6 +4,7 @@
 import os
 import time
 from typing import List, Union  # , Callable, Iterator, Optional
+from functools import partial
 
 import numpy as np
 import pandas as pd
@@ -36,7 +37,7 @@ from napari_dapi_ring_analysis._logger import logger
 
 class oligoInterface(QtWidgets.QWidget):
 
-    signalSelectImageLayer = QtCore.Signal(object, object, object)
+    signalSelectImageLayer = QtCore.Signal(object, object, object, object)
     """Emit when user changes to image layer in napari viewer.
     
     Args:
@@ -94,6 +95,28 @@ class oligoInterface(QtWidgets.QWidget):
 
         self.updateStatus('Ready')
 
+    def slot_selectFromPlot(self, d : dict):
+        """Whebn user selects point in scatter plot, select in file list and show in napari.
+        """
+        logger.info(f'find row matching {d["path"]}')
+        logger.info(f'  only for d["dataType"]=="All Spikes" ')
+        if d['dataType'] != 'All Spikes':
+            return
+        df = self._oligoAnalysisFolder.getDataFrame()
+        # print(df['path'])
+
+        _path = d['path']
+        _row = df.index[df['path'] == _path]
+
+        if len(_row) == 0:
+            return
+        
+        rowIdx = _row[0]
+
+        logger.info(f'selecting row: {rowIdx}')
+        
+        self._analysisTable.selectRow(rowIdx)
+
     def switchFolder(self, folderPath : str):
         
         if folderPath is None or not os.path.isdir(folderPath):
@@ -117,11 +140,17 @@ class oligoInterface(QtWidgets.QWidget):
             self._analysisTable.mySetModel(myModel)
 
             # hide a number of columns in tableview
+            # don't hide dapiMaxInt as it tells us when cellpose goes wrong!
             hideColumns = ['date', 'time',
                     'xPixels', 'yPixels', 'xVoxel', 'yVoxel', 'zVoxel',
                     'dapiChannel', 'cytoChannel',
                     'xyScaleFactor',
-                    'cytoStackPixels', 'cytoMaskPixels']
+                    'cytoStackPixels', 'cytoMaskPixels',
+                    'dapiMinInt',
+                    'cytoMinInt',
+                    'dapiOtsuThreshold', 'dapiStackPixels', 'dapiMaskPixels', 'dapiMaskPercent',
+                    #'badcolumntest'
+                    'sliceNumber', 'imageNumber']
             for hideColumn in hideColumns:
                 self._analysisTable.mySetColumnHidden(hideColumn)
 
@@ -167,13 +196,21 @@ class oligoInterface(QtWidgets.QWidget):
             # print('  _activeLayer:', _activeLayer)
             # print('  _activeLayer:', type(_activeLayer))
             
-            _data = _activeLayer.data
             _name = _activeLayer.name
+            _data = _activeLayer.data
             _colorMapName = _activeLayer.colormap.name
+            _contrast_limits = _activeLayer.contrast_limits
+
+            _ndim = _activeLayer.ndim
+            _rgb = _activeLayer.rgb
 
             # napari.utils.Colormap: colormap
             #print(_activeLayer.colormap)  # 2d array of [r,g,b,a]
-            print(f'  _activeLayer.colormap.name:{_activeLayer.colormap.name}')
+            logger.info(f'  _activeLayer.name:{_name}')
+            logger.info(f'  _activeLayer.ndim:{_ndim}')
+            logger.info(f'  _activeLayer.data.shape:{_data.shape}')
+            logger.info(f'  _activeLayer.rgb:{_rgb}')  # last dimension of the data has length 3 or 4
+            logger.info(f'  _activeLayer.colormap.name:{_activeLayer.colormap.name}')
 
             # TODO: when our hist signals contrast slider change,
             #   change layer.events.contrast_limits
@@ -187,7 +224,11 @@ class oligoInterface(QtWidgets.QWidget):
             # self._bHistogramWidget.signal_contrast_limits.connect(_activeLayer.events.contrast_limits)
 
             logger.info(f'  -->> emit signalSelectImageLayer _data.shape {_data.shape} _name:{_name}')
-            self.signalSelectImageLayer.emit(_data, _name, _colorMapName)
+            self.signalSelectImageLayer.emit(_data,
+                                            _name,
+                                            _colorMapName,
+                                            #_activeLayer,
+                                            _contrast_limits)
 
             # todo: set the hist signal signalContrastChange
             # to set the contrast of napari layer _activeLayer
@@ -245,6 +286,22 @@ class oligoInterface(QtWidgets.QWidget):
         aCheckbox.stateChanged.connect(self.on_points_checkbox)
         hLayout.addWidget(aCheckbox, alignment=_alignLeft)
 
+        # 3x different napari plots
+        aLabel = QtWidgets.QLabel('Napari')
+        hLayout.addWidget(aLabel, alignment=_alignLeft)
+
+        aButton = QtWidgets.QPushButton('Full')
+        aButton.clicked.connect(partial(self.on_napari_full_button, 'Full'))
+        hLayout.addWidget(aButton, alignment=_alignLeft)
+
+        aButton = QtWidgets.QPushButton('Dapi')
+        aButton.clicked.connect(partial(self.on_napari_full_button, 'Dapi'))
+        hLayout.addWidget(aButton, alignment=_alignLeft)
+
+        aButton = QtWidgets.QPushButton('Cyto')
+        aButton.clicked.connect(partial(self.on_napari_full_button, 'Cyto'))
+        hLayout.addWidget(aButton, alignment=_alignLeft)
+
         hLayout.addStretch()  # required for alignment=_alignLeft 
         vLayout.addLayout(hLayout)
 
@@ -268,7 +325,7 @@ class oligoInterface(QtWidgets.QWidget):
         # one row with save and filename
         hLayout = QtWidgets.QHBoxLayout()
 
-        aButton = QtWidgets.QPushButton('Save')
+        aButton = QtWidgets.QPushButton('Save Analysis')
         aButton.clicked.connect(self.on_save_button)
         hLayout.addWidget(aButton, alignment=_alignLeft)
 
@@ -284,6 +341,11 @@ class oligoInterface(QtWidgets.QWidget):
         aButton = QtWidgets.QPushButton('Make Cyto Mask')
         aButton.setToolTip('Make a binary mask from the "cyto" channel')
         aButton.clicked.connect(self.on_make_red_mask)
+        hLayout.addWidget(aButton, alignment=_alignLeft)
+
+        aButton = QtWidgets.QPushButton('Make DAPI Mask')
+        aButton.setToolTip('Make a binary mask from the "DAPI" channel')
+        aButton.clicked.connect(self.on_make_green_mask)
         hLayout.addWidget(aButton, alignment=_alignLeft)
 
         aLabel = QtWidgets.QLabel('Gaussian Sigma')
@@ -355,7 +417,11 @@ class oligoInterface(QtWidgets.QWidget):
         rowList = [self._selectedRow]
         
         # reduce to just one row
-        df = dfAnalysis[dfAnalysis['file']==self._selectedFile]
+        df = dfAnalysis[dfAnalysis['path']==self._selectedFile]
+
+        if len(df) == 0:
+            logger.error(f'did not find path: {self._selectedFile}')
+            return
 
         # print('df gaussianSigma:')
         # print(df['gaussianSigma'])
@@ -389,6 +455,27 @@ class oligoInterface(QtWidgets.QWidget):
         checked = state > 0
         if self._layerTableDocWidget is not None:
             self._layerTableDocWidget.setVisible(checked)
+
+    def on_napari_full_button(self, name):
+        # take current file selection and switch to full napari view
+        if self._selectedFile is None:
+            return
+
+        # get selected oa
+        oa = self._oligoAnalysisFolder.getOligoAnalysis(self._selectedFile)
+
+        if name == 'Full':
+            self.clearViewer()  # remove all layers
+            self.displayOligoAnalysis_napari(oa)
+        elif name == 'Dapi':
+            self.clearViewer()  # remove all layers
+            self.displayChannel_napari(oa, imageChannels.dapi)
+        elif name == 'Cyto':
+            self.clearViewer()  # remove all layers
+            self.displayChannel_napari(oa, imageChannels.cyto)
+
+        else:
+            logger.info(f'Button "{name}" not understood')
 
     def on_load_folder_button(self):
 
@@ -485,6 +572,38 @@ class oligoInterface(QtWidgets.QWidget):
 
         self.updateStatus('Made Cyto mask after gaussian filter and otsu threshold')
 
+    def on_make_green_mask(self):
+        """Remake green mask using xxx as parameter.
+        """  
+        logger.info('')
+
+        # filename = self._selectedFile
+        # if filename is None:
+        #     return
+        # oa = self._oligoAnalysisFolder.getOligoAnalysis(filename)
+
+        oa = self.getSelectedAnalysis()
+        if oa is None:
+            return
+
+        # need to set sigma in oa._header['gaussianSigma']
+        _gaussianSigma = self.on_edit_sigma()
+        if _gaussianSigma is None:
+            # we got a bad value, expecting a scalar or a list/tuple of (z, y, x)
+            return
+        oa._header['gaussianSigma'] = _gaussianSigma
+
+        # refresh interface
+        logger.info(f'fetching new green mask with sigma: {_gaussianSigma}')
+
+        _greenImageMask, _greenImageFiltered = oa.analyzeImageMask(imageChannels.dapi)
+        self._greenbinaryLayer.data = _greenImageMask  # oa.getImageMask('red')
+        self._greenFilteredLayer.data = _greenImageFiltered  # oa.getImageMask('red')
+
+        self.refreshAnalysisTable()
+
+        self.updateStatus('Made DAPI mask after gaussian filter and otsu threshold')
+
     def on_make_ring_mask(self, value):
         erodeIterations = self._erodeSpinBox.value()
         dilateIterations = self._dilateSpinBox.value()
@@ -541,7 +660,7 @@ class oligoInterface(QtWidgets.QWidget):
         # print('  selected row dict is:')
         # print(rowDict)
 
-        filename = rowDict['file']
+        filename = rowDict['path']
         self.switchFile(filename, oneRow)
 
         # sfn
@@ -555,30 +674,42 @@ class oligoInterface(QtWidgets.QWidget):
         oa = self._oligoAnalysisFolder.getOligoAnalysis(self._selectedFile)
         return oa
 
-    def switchFile(self, filename : str, row : int):
-        """load oa
+    def switchFile(self, filepath : str, row : int):
+        """load oa and display in napari
 
         Args:
             filename:
             row:
         """
-        logger.info(f'filename:{filename}')
+        filepath = os.path.join(self._folderPath, filepath)
 
-        if filename == self._selectedFile:
+        _folder, _filename = os.path.split(filepath)
+
+        logger.info(f'filename:{_filename}')
+
+        if filepath == self._selectedFile:
             logger.info(f'  file is already selected: {self._selectedFile}')
             return
         
         self._selectedRow = row
-        self._selectedFile = filename
+        self._selectedFile = filepath
 
-        self._viewer.title = filename
+        self._viewer.title = filepath
                 
         # get selected oa
-        oa = self._oligoAnalysisFolder.getOligoAnalysis(filename)
+        oa = self._oligoAnalysisFolder.getOligoAnalysis(filepath)
 
         # complete refresh of napari viewer
         self.clearViewer()  # remove all layers
-        self.displayOligoAnalysis_napari(oa)
+
+        # jan 2023
+        #self.displayCyto_napari(oa, imageChannels.cyto)
+        #self.displayCyto_napari(oa, imageChannels.dapi)
+        
+        # jan 2023, was this
+        #self.displayOligoAnalysis_napari(oa)
+        logger.info('REMEMBER, defaulting to cyto view')
+        self.displayChannel_napari(oa, imageChannels.cyto)
 
         # set gaussian sigma
         _gaussianSigma = oa._header['gaussianSigma']
@@ -592,7 +723,7 @@ class oligoInterface(QtWidgets.QWidget):
         # set analysis table
         # xxx
 
-        self._selectedFilleLabel.setText(filename)
+        self._selectedFilleLabel.setText(_filename)
 
     def clearViewer(self):
         """Remove all layers from the napari viewer.
@@ -620,7 +751,7 @@ class oligoInterface(QtWidgets.QWidget):
         name = layer.name
         
         # napari._qt.widgets.qt_viewer_dock_widget.QtViewerDockWidget
-        _layerTableDocWidget = viewer.window.add_dock_widget(self._ltp, area=area, name=name)
+        _layerTableDocWidget = self._viewer.window.add_dock_widget(self._ltp, area=area, name=name)
         
         # see: https://forum.image.sc/t/can-i-remove-the-close-icon-when-i-create-a-dock-widget-in-the-viewer-with-add-dock-widget/67369/3
         _layerTableDocWidget._close_btn = False
@@ -647,8 +778,65 @@ class oligoInterface(QtWidgets.QWidget):
         return _docWidget
 
     def closeLayerTablePlugin(self):
-        viewer.window.remove_dock_widget(self._layerTableDocWidget) 
+        self._viewer.window.remove_dock_widget(self._layerTableDocWidget) 
         self._layerTableDocWidget = None
+
+    def displayChannel_napari(self, oa : oligoAnalysis, imageChannel : imageChannels.cyto):
+        """Display cyto or dapi (image, filtered, binary).
+        
+        Jan 2023
+        """
+
+        logger.info('')
+        
+        #_imageChannel = imageChannels.cyto
+
+        if imageChannel == imageChannels.cyto:
+            _color = 'red'
+        elif imageChannel == imageChannels.dapi:
+            _color = 'green'
+
+        layerName = imageChannel.value
+
+        # required so we do not trigger napari events
+        self._buildingNapari = True
+
+        # physical units, x/y/z scalue of the image in um/pixel        
+        xVoxel = oa._header['xVoxel']
+        yVoxel = oa._header['yVoxel']
+        zVoxel = oa._header['zVoxel'] / 2  # real scale looks like crap!
+        scale = (zVoxel, yVoxel, xVoxel)
+
+        viewer = self._viewer
+
+        # raw
+        imgCyto = oa.getImageChannel(imageChannel)
+        # filtered
+        imgCyto_filtered = oa.getImageFiltered(imageChannel)        
+        # binary after otsu
+        imgCyto_binary = oa.getImageMask(imageChannel)
+
+        imgCytoLayer = viewer.add_image(imgCyto, name=f'{layerName} Image',
+                                scale=scale, blending='additive')
+        imgCytoLayer.visible = True
+        imgCytoLayer.colormap = _color
+        _maxCyto = np.max(imgCyto) * 0.3
+        imgCytoLayer.contrast_limits = (np.min(imgCyto), _maxCyto)
+
+        self._redbinaryLayer = viewer.add_labels(imgCyto_binary, name=f'{layerName} Binary',
+                                color={1:'#FF00FFFF'},
+                                scale=scale)
+        self._redbinaryLayer.visible = True
+
+        self._redFilteredLayer = viewer.add_image(imgCyto_filtered, name=f'{layerName} Filtered',
+                                scale=scale, blending='additive')
+        self._redFilteredLayer.visible = True
+        self._redFilteredLayer.colormap = 'yellow'  # _color
+        print('filtered min:', imgCyto_filtered.min(), imgCyto_filtered.max())
+        _maxCytoFiltered = np.max(imgCyto_filtered) * 0.3
+        self._redFilteredLayer.contrast_limits = (np.min(imgCyto_filtered), _maxCytoFiltered)
+
+        self._buildingNapari = True
 
     def displayOligoAnalysis_napari(self, oa : oligoAnalysis):
         """Display all oligo analysis images in napari viewer.
@@ -681,13 +869,15 @@ class oligoInterface(QtWidgets.QWidget):
                                 scale=scale, blending='additive')
         imgCytoLayer.visible = True
         imgCytoLayer.colormap = 'red'
-        imgCytoLayer.contrast_limits = (np.min(imgCyto), np.max(imgCyto))
+        _maxCyto = np.max(imgCyto) * 0.3
+        imgCytoLayer.contrast_limits = (np.min(imgCyto), _maxCyto)
 
         imgDapiLayer = viewer.add_image(imgDapi, name='DAPI Image',
                                 scale=scale, blending='additive')
         imgDapiLayer.visible = True
         imgDapiLayer.colormap = 'green'
-        imgDapiLayer.contrast_limits = (np.min(imgDapi), np.max(imgDapi))
+        _maxDapi = np.max(imgDapi) * 0.3
+        imgDapiLayer.contrast_limits = (np.min(imgDapi), _maxDapi)
 
         # we want to be able to update this image
         self._redbinaryLayer = viewer.add_labels(imgCyto_binary, name='Cyto Binary',
@@ -785,24 +975,65 @@ class oligoInterface(QtWidgets.QWidget):
         self._buildingNapari = False
 
     def slot_contrastChange(self, contrastDict):
+        """Received when user changes contrast in our widget.
+        
+        Args:
+            contrastDict: {'channel': 1, 'colorLUT': None, 'minContrast': 0, 'maxContrast': 46, 'bitDepth': 8}
+        """
         # TODO: fix this
         logger.info('')
-        #print(contrastDict)
+        print(contrastDict)
 
         # if napari viewer selected layer is image and mateches name
-        # directly set contrast_limmits = [min, max]
+        # directly set contrast_limits = [min, max]
+        _title = contrastDict['title']  # corresponds to napari image layer name/title
+        try:
+            _layer = self._viewer.layers[_title]
+            print(_layer)
+            minContrast = contrastDict['minContrast']
+            maxContrast = contrastDict['maxContrast']
+            _layer.contrast_limits = [minContrast, maxContrast]
+        except (KeyError) as e:
+            logger.warning('Did not find napari layer named "{_title}"')
 
-if __name__ == '__main__':
+def showScatterPlots(oi :oligoInterface):
+    path = '/Users/cudmore/Dropbox/data/whistler/cudmore/oligo-simmary-20230112-cs-0.7.csv'
+    df = pd.read_csv(path)
+    df = df[df.parentFolder != 'Adolescent']
+    df = df.reset_index()
+
+    from bScatterPlotWidget2 import bScatterPlotMainWindow
+    interfaceDefaults = {'Y Statistic': 'cytoMaskPercent',
+                        'X Statistic': 'parentFolder',
+                        'Hue': 'parentFolder',
+                        'Group By': 'parentFolder'}
+
+    # parentFolder is condition (saline, fst, morphine)
+    # grandParentFolder is date of imaging
+    categoricalList = ['parentFolder', 'grandParentFolder', 'region']
+    hueTypes = ['parentFolder', 'grandParentFolder', 'region']
+    analysisName = 'parentFolder'
+    sortOrder = ['parentFolder', 'grandParentFolder', 'region']
+    spw = bScatterPlotMainWindow(None, categoricalList, hueTypes, analysisName,
+                sortOrder=sortOrder,
+                masterDf=df,
+                interfaceDefaults=interfaceDefaults)
+    spw.signalSelectFromPlot.connect(oi.slot_selectFromPlot)
+    spw.show()
+
+def run():
     # cziPath = '/Users/cudmore/Dropbox/data/whistler/data-oct-10/FST/B35_Slice2_RS_DS1.czi'
     # oa = oligoAnalysis(cziPath)
 
     # for oligoInterface
     #_folderPath = '/Users/cudmore/Dropbox/data/whistler/data-oct-10/FST'
-    _folderPath = '/Users/cudmore/Dropbox/data/whistler/data-oct-10/Morphine'
+    #_folderPath = '/Users/cudmore/Dropbox/data/whistler/cudmore/20221010/Morphine'
 
     #_folderPath = '/Users/cudmore/Dropbox/data/whistler/11-9-22 (Adolescent and Saline)/Adolescent'
     #_folderPath = '/Users/cudmore/Dropbox/data/whistler/11-9-22 (Adolescent and Saline)/Saline'
-    
+
+    _folderPath = '/Users/cudmore/Dropbox/data/whistler/cudmore'
+
     viewer = napari.Viewer()
 
     # get underlying qt QApplication
@@ -831,5 +1062,9 @@ if __name__ == '__main__':
     oi.show()
 
     #oi.displayOligoAnalysis(oa)
+    showScatterPlots(oi)
 
     napari.run()
+
+if __name__ == '__main__':
+    run()

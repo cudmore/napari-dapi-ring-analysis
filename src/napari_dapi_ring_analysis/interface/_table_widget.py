@@ -56,7 +56,23 @@ class myTableView(QtWidgets.QTableView):
         self.resizeRowsToContents()
 
     def keyPressEvent(self, event):
-        logger.info('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
+        """
+        Args:
+            vent: PyQt5.QtGui.QKeyEvent
+        """
+        #logger.info(f'event: {type(event)})')
+        modifiers = QtWidgets.QApplication.keyboardModifiers()
+        #isShift = modifiers == QtCore.Qt.ShiftModifier
+        isCtrl = modifiers == QtCore.Qt.ControlModifier
+        keyText = event.text()
+        keyEnum = event.key()
+        keyTextIsC = keyEnum  == QtCore.Qt.Key_C
+        #print(f'{isCtrl} "{keyText}" "{keyEnum}"')
+        if isCtrl and keyTextIsC:
+            dfCopy = self.myModel.myGetData().copy()
+            dfCopy.to_clipboard(sep='\t', index=False)
+            logger.info(f'Copied table to clipboard with shape: {dfCopy.shape}')
+            print(dfCopy)
 
     def getNumRows(self):
         """Get number of rows from the model.
@@ -83,8 +99,12 @@ class myTableView(QtWidgets.QTableView):
                 it is not the visual row index if table is sorted
         """
         modelIndex = self.myModel.index(rowIdx, 0)  # rowIdx is in 'model' coordinates
+        _visualRow = self.proxy.mapFromSource(modelIndex)
         visualRow = self.proxy.mapFromSource(modelIndex).row()
         logger.info(f'model rowIdx:{rowIdx} corresponds to visual row:{visualRow}')
+
+        self.scrollTo(_visualRow, QtWidgets.QAbstractItemView.PositionAtTop)
+
         super().selectRow(visualRow)
 
     def mySelectRows(self, rows : Set[int]):
@@ -127,11 +147,14 @@ class myTableView(QtWidgets.QTableView):
         #
         self.blockUpdate = False
 
-    def mySetModel(self, model : pd.DataFrame):
+    #def mySetModel(self, model : pd.DataFrame):
+    def mySetModel(self, model):
         """ Set the model. Needed so we can show/hide columns
 
         Args:
-            model (pd.DataFrame): DataFrame to set model to.
+            napari_dapi_ring_analysis.interface._data_model.pandasModel
+            
+            NOT a df: model (pd.DataFrame): DataFrame to set model to.
         """
         self.myModel = model
         
@@ -153,6 +176,11 @@ class myTableView(QtWidgets.QTableView):
         self._refreshHiddenColumns()
 
     def mySetColumnHidden(self, colStr : str, hidden : bool = True):
+        _columns = self.myModel.myGetData().columns
+        if not colStr in _columns:
+            logger.error(f'did not find {colStr} in model columns')
+            return
+
         if hidden:
             self.hiddenColumnSet.add(colStr)  # will not add twice
         else:

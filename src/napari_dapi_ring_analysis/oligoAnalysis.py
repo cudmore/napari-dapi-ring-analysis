@@ -49,7 +49,14 @@ class oligoAnalysis():
         # default header
         # load header from raw image stack (czi)
         self._header : dict = _loadHeader(path)
-        
+
+        christineDict = oligoUtils.parseFileName(path)
+        if christineDict is None:
+            logger.error(f'DID NOT GET CHRISTINE FILE NAME DICTIONARY')
+        else:
+            for k,v in christineDict.items():
+                self._header[k] = v
+
         self._header['dapiChannel'] = 1
         self._header['cytoChannel'] = 0
 
@@ -445,7 +452,7 @@ class oligoAnalysis():
         if imageChannel == imageChannels.dapi:
             return self._rgbStack[:, :, :, self.dapiChannel]  # 1
 
-    def _getRgbStack(self) -> np.ndarray:
+    def _getRgbStack(self, forceMake=False) -> np.ndarray:
         """Load or make an rgb stack from raw file.
         
         If rgb tif exists then load, otherwise make and save.
@@ -454,7 +461,7 @@ class oligoAnalysis():
 
         # if True then always remake from czi file
         # if False then load what we saved
-        forceMake = False # on flight to sfn2022
+        #forceMake = False # on flight to sfn2022
         logger.info(f'  forceMake:{forceMake} SFN NOT LOADING, if True then REGENERATING _rgbStack EACH TIME')
 
         if not forceMake and os.path.isfile(rgbSavePath):
@@ -571,8 +578,8 @@ class oligoAnalysis():
             imgData_binary = tifffile.imread(maskPath)
             return imgData_binary
         
-    def analyzeImageMask(self, imageChannel : imageChannels):
-        """Create a binary image mask.
+    def analyzeImageMask(self, imageChannel : imageChannels, gaussianSigma = None):
+        """Create a binary image mask for either dapi or cyto
             - Gaussian blur
             - Otsu threshold
 
@@ -584,12 +591,13 @@ class oligoAnalysis():
         """
         imgData = self.getImageChannel(imageChannel)
 
-        _gaussianSigma = self._header['gaussianSigma']
+        if gaussianSigma is None:
+            gaussianSigma = self._header['gaussianSigma']
         
-        logger.info(f'{self.filename} imageChannel:{imageChannel.value} _gaussianSigma:{_gaussianSigma}')
+        logger.info(f'{self.filename} imageChannel:{imageChannel.value} _gaussianSigma:{gaussianSigma}')
         
         otsuThreshold, imgData_blurred, imgData_binary = \
-            oligoUtils.getOtsuThreshold(imgData, sigma=_gaussianSigma)
+            oligoUtils.getOtsuThreshold(imgData, sigma=gaussianSigma)
         
         # calculate pixel stats
         numStackPixels = imgData_binary.size
@@ -601,7 +609,8 @@ class oligoAnalysis():
         logger.info(f'  -- RESULTS: {_chStr} otsuThreshold:{otsuThreshold} maskPercent:{maskPercent}')
 
         #self._header['gaussianSigma'] = numStackPixels
-        self._header[f'{_chStr}otsuThreshold'] = otsuThreshold
+        self._header[f'{_chStr}GausSigma'] = gaussianSigma
+        self._header[f'{_chStr}OtsuThreshold'] = otsuThreshold
         self._header[f'{_chStr}StackPixels'] = numStackPixels
         self._header[f'{_chStr}MaskPixels'] = numMaskPixels
         self._header[f'{_chStr}MaskPercent'] = maskPercent

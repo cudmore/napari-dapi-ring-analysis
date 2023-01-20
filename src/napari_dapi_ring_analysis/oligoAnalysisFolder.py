@@ -68,12 +68,16 @@ class oligoAnalysisFolder():
         if len(self._dfFolder)==0:
             logger.warning(f'No valid image files in folder: {self._folderPath}')
         else:
-            files = self._dfFolder['file'].tolist()
-            for file in files:
-                #logger.info(f'  loading file header for: {file}')
-                filePath = os.path.join(self._folderPath, file)
-                self._analysisList[file] = oligoAnalysis(filePath)
-            logger.info(f'Loaded {len(files)} oligoAnalysis files.')
+            # files = self._dfFolder['file'].tolist()
+            # for file in files:
+            #     #logger.info(f'  loading file header for: {file}')
+            #     filePath = os.path.join(self._folderPath, file)
+            #     self._analysisList[file] = oligoAnalysis(filePath)
+            _paths = self._dfFolder['path'].tolist()
+            for _path in _paths:
+                _path = os.path.join(self._folderPath, _path)
+                self._analysisList[_path] = oligoAnalysis(_path)
+            logger.info(f'Loaded {len(_paths)} oligoAnalysis files.')
 
     def getDataFrame(self):
         """Get the dataframe of loaded file headers.
@@ -106,25 +110,26 @@ class oligoAnalysisFolder():
         
         return df
 
-
     def getRow(self, row : int) -> dict:
         """Get one row as dict.
         """
         df = self._dfFolder.loc[row]
         return df.to_dict()
     
-    def getOligoAnalysis(self, file : str, loadImages = True):
+    def getOligoAnalysis(self, filepath : str, loadImages = True):
         """Given a raw file name, return the oligoAnalysis.
         
-        Make if necc.
+        Load and make if necc.
 
         Args:
             file:
             loadImages:
         """
+        #_path = os.path.join(self.folderPath, _path)
+        
         #logger.info(f'file:{file}')
-        if file in self._analysisList.keys():
-            oa = self._analysisList[file]
+        if filepath in self._analysisList.keys():
+            oa = self._analysisList[filepath]
             if loadImages and not oa.isLoaded():
                 oa.load()
             #logger.info(f'  returning: {oa}')

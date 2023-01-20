@@ -7,3 +7,8 @@ aicsimageio
 aicspylibczi
 cellpose
 pyqtgraph
+
+matplotlib
+mplcursors
+seaborn
+

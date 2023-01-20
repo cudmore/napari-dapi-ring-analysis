@@ -77,7 +77,8 @@ def runModelOnImage(imgPath : str, imgData : np.ndarray = None, setupLogger=True
     # shape is (slices, x, y, rgb)
     logger.info(f'  {imgData.shape}')  # (7, 196, 196, 3)
 
-    # gaussian filter each rgb channel
+    # gaussian filter each rgb channel???
+    '''
     from skimage.filters import threshold_otsu, gaussian
     from scipy.signal import medfilt
     doGauss = True
@@ -96,7 +97,6 @@ def runModelOnImage(imgPath : str, imgData : np.ndarray = None, setupLogger=True
         if doGauss:
             _gausFilter = gaussian(_oneChannel, sigma=_sigma)  # float64
         else:
-            
             _gausFilter = medfilt(_oneChannel, kernel_size=_kernel_size)  # uint8
 
         logger.info(f'  idx:{rgbChannelIdx} _gausFilter:{_gausFilter.shape} {_gausFilter.dtype}')
@@ -114,6 +114,7 @@ def runModelOnImage(imgPath : str, imgData : np.ndarray = None, setupLogger=True
         logger.info(f'    2 _gausFilter:{_gausFilter.shape} {_gausFilter.dtype}')
         logger.info(f'      min:{np.min(_gausFilter)} max:{np.max(_gausFilter)}')
         imgData[:,:,:,rgbChannelIdx] = _gausFilter
+    '''
 
     #sys.exit(1)
 
@@ -131,7 +132,14 @@ def runModelOnImage(imgPath : str, imgData : np.ndarray = None, setupLogger=True
     # made new model at sfn CP_20221115_123812
 
     channels = [[2,1]]  # # grayscale=0, R=1, G=2, B=3
+    
     diameter = 30 # 20 # 16.0
+
+    # was this for last run of model - SFN
+    diameter = 16 # 20 # 16.0
+    
+    flow_threshold = 0.8  # default is 0.4
+
     do_3D = True
     net_avg = False
 
@@ -152,11 +160,16 @@ def runModelOnImage(imgPath : str, imgData : np.ndarray = None, setupLogger=True
 
     logger.info('  running model.eval')
     logger.info(f'    diameter: {diameter}')
+    logger.info(f'    flow_threshold: {flow_threshold}')
     logger.info(f'    channels: {channels}')
     logger.info(f'    do_3D: {do_3D}')
 
+    # jan2023, flow_threshold = 0.4
+    # try 0.8
     masks, flows, styles = model.eval(imgData,
-                                        diameter=diameter, channels=channels,
+                                        diameter=diameter,
+                                        flow_threshold=flow_threshold,  # added jan2023
+                                        channels=channels,
                                         do_3D=do_3D
                                         )
 
@@ -173,18 +186,31 @@ def runModelOnImage(imgPath : str, imgData : np.ndarray = None, setupLogger=True
 def batchRunFolder0():
     """run a cellpose model on entire folders of czi rgb stack
     """
-    folderPath1 = '/Users/cudmore/Dropbox/data/whistler/data-oct-10/Morphine'
-    folderPath0 = '/Users/cudmore/Dropbox/data/whistler/data-oct-10/FST'
+    folderPathList = [
+        '/Users/cudmore/Dropbox/data/whistler/cudmore/20221010/FST',
+        '/Users/cudmore/Dropbox/data/whistler/cudmore/20221010/Morphine',
     
-    folderPath2 = '/Users/cudmore/Dropbox/data/whistler/11-9-22 (Adolescent and Saline)/Adolescent'
-    folderPath3 = '/Users/cudmore/Dropbox/data/whistler/11-9-22 (Adolescent and Saline)/Saline'
+        '/Users/cudmore/Dropbox/data/whistler/cudmore/20221031/FST',
+        '/Users/cudmore/Dropbox/data/whistler/cudmore/20221031/Morphine',
     
-    folderPathList = [folderPath0, folderPath1, folderPath2, folderPath3]
-
+        '/Users/cudmore/Dropbox/data/whistler/cudmore/20221109/Adolescent',
+        '/Users/cudmore/Dropbox/data/whistler/cudmore/20221109/Saline',
+    ]
+    
     # do one folder for debugging
-    folderPathList = [folderPath1]
+    folderPathList = [
+        '/Users/cudmore/Dropbox/data/whistler/cudmore/20221010/Morphine',
+    ]
 
     logger.info(f'Running on folderPathList')
+
+    # check all folders exists
+    for folderPath in folderPathList:
+        if os.path.isdir(folderPath):
+            print(f'  ok: folder exists: {folderPath}')
+        else:
+            print(f'  error: folder does not exist: {folderPath}')
+            return
 
     for folderPath in folderPathList:
         print(' . === ', folderPath)
@@ -214,8 +240,8 @@ def batchRunFolder(folderPath : str):
         rgbStackPath = oa._getRgbPath()
         
         # this is our small-rgb stack, it is made from raw czi file
-        # this should save?
-        rgbStack = oa._getRgbStack()  # np.ndarrray
+        # forceMake will remake from czi and save -small-rgb
+        rgbStack = oa._getRgbStack(forceMake=True)  # np.ndarrray
         
         #logger.info(f'  oligoanalysis rgbStack for cellpose shape is: {rgbStack.shape}')
 

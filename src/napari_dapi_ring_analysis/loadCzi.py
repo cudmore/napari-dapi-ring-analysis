@@ -3,8 +3,10 @@ Load czi files using aicsimageio
 """
 
 import os
+import sys
 from pprint import pprint
 from datetime import datetime
+import glob
 
 import pandas as pd
 
@@ -17,27 +19,44 @@ from napari_dapi_ring_analysis._logger import logger
 
 loadFileTypes = ['.czi', '.tif', '.oir']
 
-def loadFolder(folderPath) -> pd.DataFrame:
+def loadFolder(folderPath : str) -> pd.DataFrame:
     """Load headers for a folder of czi files.
     
     Returns:
         pd.DataFrame of file headers, one per row
     """
-    _folder, parentFolder = os.path.split(folderPath)
+    # _folder, parentFolder = os.path.split(folderPath)
 
-    fileList = os.listdir(folderPath)
+    # fileList = os.listdir(folderPath)
+    # fileList = sorted(fileList)
+
+    files = glob.glob(os.path.join(folderPath, '**/*.czi'), recursive=True)
+    fileList = []
+    for file in files:
+        if '-analysis' in file:
+            continue
+        fileList.append(file)
+
     fileList = sorted(fileList)
+
     headerList = []
     #sumSlices = 0
-    for file in fileList:
-        _filestub, _ext = os.path.splitext(file)
-        if not _ext in loadFileTypes:
-            continue
-        filePath = os.path.join(folderPath, file)
+    for filePath in fileList:
+        
+        # glob gives us only .czi
+        # _filestub, _ext = os.path.splitext(file)
+        # if not _ext in loadFileTypes:
+        #     continue
+        
+        # glob gives us the path
+        # filePath = os.path.join(folderPath, file)
 
         #header = loadCziHeader(filePath)
         header = _loadHeader(filePath)
         
+        # path is stup based on folderPath
+        header['path'] = header['path'].replace(folderPath + '/', '')
+
         #zPixels = header['zPixels']
 
         # header['firstSlice_mask'] = sumSlices
@@ -72,11 +91,20 @@ def _loadHeader(path : str) -> dict:
     _parentFolder, _ = os.path.split(path)
     _, _parentFolder = os.path.split(_parentFolder)
     
+    try:
+        _grandParentFolder = os.path.split(path)[0]
+        _grandParentFolder = os.path.split(_grandParentFolder)[0]
+        _grandParentFolder = os.path.split(_grandParentFolder)[1]
+    except(IndexError) as e:
+        print('error:', path)
+        print(os.path.split(path))
+
     _date = ''
     _time = ''
 
     _header = {
         'file': os.path.split(path)[1],
+        'grandParentFolder': _grandParentFolder,
         'parentFolder': _parentFolder,
         'date': _date,
         'time': _time,
@@ -86,6 +114,7 @@ def _loadHeader(path : str) -> dict:
         'xVoxel': xVoxel,
         'yVoxel': yVoxel,
         'zVoxel': zVoxel,
+        'path': path
     }
 
     return _header
@@ -239,8 +268,16 @@ if __name__ == '__main__':
     # print(dfFolder)
 
     # a czi saved as tif in Fiji/ImageJ
-    tifPath = '/Users/cudmore/Dropbox/data/whistler/data-oct-10/FST/G22_Slice2_RS_DS5.tif'
-    tifPath = '/Users/cudmore/Dropbox/data/whistler/data-oct-10/FST/Untitled-1-channel.tif'
-    tifPath = '/Users/cudmore/Dropbox/data/whistler/data-oct-10/FST/rgb.tif'
-    tifPath = '/Users/cudmore/Dropbox/data/whistler/data-oct-10/FST/Composite.tif'
-    _loadTif(tifPath)
+    # tifPath = '/Users/cudmore/Dropbox/data/whistler/data-oct-10/FST/G22_Slice2_RS_DS5.tif'
+    # tifPath = '/Users/cudmore/Dropbox/data/whistler/data-oct-10/FST/Untitled-1-channel.tif'
+    # tifPath = '/Users/cudmore/Dropbox/data/whistler/data-oct-10/FST/rgb.tif'
+    # tifPath = '/Users/cudmore/Dropbox/data/whistler/data-oct-10/FST/Composite.tif'
+    # _loadTif(tifPath)
+
+    path = '/Users/cudmore/Dropbox/data/whistler/cudmore'
+    
+    # sys.exit(1)
+
+    df = loadFolder(path)
+    print(len(df))
+    print(df)

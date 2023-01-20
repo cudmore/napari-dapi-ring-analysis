@@ -1,14 +1,50 @@
 
 import numpy as np
 
+from typing import List
+
 from qtpy import QtGui, QtCore, QtWidgets
 import pyqtgraph as pg
 
 from napari_dapi_ring_analysis._logger import logger
 
-#class _histogram(QtWidgets.QToolBar):
+class DoubleSlider(QtWidgets.QSlider):
+    """
+    See: https://stackoverflow.com/questions/42820380/use-float-for-qslider
+    """
+    # create our our signal that we can connect to if necessary
+    doubleValueChanged = QtCore.Signal(float)
+
+    def __init__(self, decimals=3, orientation=QtCore.Qt.Horizontal, parent=None):
+        super().__init__(orientation=orientation, parent=parent)
+        self._multi = 10 ** decimals
+
+        self.valueChanged.connect(self.emitDoubleValueChanged)
+
+    def emitDoubleValueChanged(self):
+        value = float(super(DoubleSlider, self).value())/self._multi
+        self.doubleValueChanged.emit(value)
+
+    def value(self):
+        return float(super(DoubleSlider, self).value()) / self._multi
+
+    def setMinimum(self, value):
+        return super(DoubleSlider, self).setMinimum(value * self._multi)
+
+    def setMaximum(self, value):
+        return super(DoubleSlider, self).setMaximum(value * self._multi)
+
+    def setSingleStep(self, value):
+        return super(DoubleSlider, self).setSingleStep(value * self._multi)
+
+    def singleStep(self):
+        return float(super(DoubleSlider, self).singleStep()) / self._multi
+
+    def setValue(self, value):
+        super(DoubleSlider, self).setValue(int(value * self._multi))
+
 class _histogram(QtWidgets.QWidget):
-    """A histogram for one channel.
+    """A histogram for one color channel.
     
     Includes spinboxes and sliders for min/max contrast.
     """
@@ -16,25 +52,30 @@ class _histogram(QtWidgets.QWidget):
 
     def __init__(self, imgData : np.ndarray, contrastDict, channel) -> None:
         super().__init__()
-        #self._myStack = myStack
+
         self._imgData = imgData
         self._contrastDict = contrastDict
 
-        _tmpBitDpeth = 8
+        _tmpBitDepth = 8
         
         self._sliceNumber = 0
         self._channel = channel
-        #self._maxValue = 2**self._myStack.header['bitDepth']  # will default to 8 if not found
-        self._maxValue = 2**_tmpBitDpeth  # will default to 8 if not found
-        self._sliceImage = None  # set by 
-
+        self._maxValue = 2**_tmpBitDepth
+        self._sliceImage = None
         self._plotLogHist = True
 
         self._buildUI()
 
-    def slot_setData(self, imgData, name : str = '', colorName : str = None):
+    def slot_setData(self, imgData,
+                        name : str = '',
+                        colorName : str = None,
+                        contrast_limits : List[int] = None):
         self._imgData = imgData
         self._contrastDict[self._channel]['colorLUT'] = colorName
+        if contrast_limits is not None:
+            self._contrastDict[self._channel]['minContrast'] = contrast_limits[0]
+            self._contrastDict[self._channel]['maxContrast'] = contrast_limits[1]
+        self._updateContrastSliders()
         self._refreshSlice()
 
     def _sliderValueChanged(self):
@@ -72,46 +113,81 @@ class _histogram(QtWidgets.QWidget):
 
         self.signalContrastChange.emit(self._contrastDict[self._channel])
 
+    def _updateContrastSliders(self):
+        """update spinbox and slider with channels current contrast.
+
+        TODO:
+            we need to set min/max based on self._imgData dtype
+        """
+        minContrast = self._contrastDict[self._channel]['minContrast']
+        maxContrast = self._contrastDict[self._channel]['maxContrast']
+
+        self.minSpinBox.setValue(minContrast)
+        self.minContrastSlider.setValue(minContrast)
+
+        self.maxSpinBox.setValue(maxContrast)
+        self.maxContrastSlider.setValue(maxContrast)
+
+        # need to set spin box and slider min/max/step based on dtype of imgData
+        # if img dtype is float and max < 1 then set max to 1
+        # can napari show a float image? Like where pixel intensity would by 1e6? I don't think so?
+        print('xxx NEED TO CREATE A FLOAT SLIDER !!!')
+        print('xxx SET max based on dtype', self._imgData.dtype)
+        maxSliderVal = 2**8
+        sliderStep = 1
+        dtype = self._imgData.dtype
+        if dtype == np.uint8:
+            maxSliderVal = 2**8
+        elif dtype == np.uint16:
+            maxSliderVal = 2**16
+        elif dtype == np.float:
+            maxImg = np.max(self._imgData)
+            if maxImg < 1:
+                maxSliderVal = 1
+                sliderStep = 0.001
+
+        self.minContrastSlider.setMaximum(maxSliderVal)
+        self.maxContrastSlider.setMaximum(maxSliderVal)
+        self.minContrastSlider.setSingleStep(sliderStep)
+        self.maxContrastSlider.setSingleStep(sliderStep)
+
+
     def _refreshSlice(self):
         self._setSlice(self._sliceNumber)
 
     def _setSlice(self, sliceNumber):
-        #logger.info(f'sliceNumber:{sliceNumber}')
+        """Set the histogram to one image slice.
+        """
         
         self._sliceNumber = sliceNumber
         
-        channel = self._channel
-        # self._sliceImage = self._myStack.getImageSlice(imageSlice=self._sliceNumber,
-        #                         channel=channel)
         self._sliceImage = self._imgData[self._sliceNumber, :, :]
 
         y,x = np.histogram(self._sliceImage, bins=255)
         if self._plotLogHist:
             y = np.log10(y, where=y>0)
 
-        # abb windows
+        # windows
         # Exception: X and Y arrays must be the same shape--got (256,) and (255,).
-        # abb macos
+        # macos
         # Exception: len(X) must be len(Y)+1 since stepMode=True (got (255,) and (255,))
         #x = x[:-1]
 
         self.pgHist.setData(x=x, y=y)
 
-        # color the hist based on xxx
+        # color the hist
         colorLut = self._contrastDict[self._channel]['colorLUT']  # like ('r, g, b)
         self.pgHist.setBrush(colorLut)
-
-        # _imageMin = np.min(self._sliceImage)
-        # self.pgPlotWidget.setXRange(_imageMin, self._maxValue, padding=0)
-
-        # print('self._maxValue:', self._maxValue)
-        # print('x:', min(x), max(x))
 
         _imageMin = np.min(self._sliceImage)
         _imageMax = np.max(self._sliceImage)
         _imageMedian = np.median(self._sliceImage)
         self.pgPlotWidget.setXRange(_imageMin, self._maxValue, padding=0)
 
+        _imageMin = round(_imageMin, 3)
+        _imageMax = round(_imageMax, 3)
+        _imageMedian = round(_imageMedian, 3)
+        
         self.minIntensityLabel.setText(f'min:{_imageMin}')
         self.maxIntensityLabel.setText(f'max:{_imageMax}')
         self.medianIntensityLabel.setText(f'med:{_imageMedian}')
@@ -181,11 +257,13 @@ class _histogram(QtWidgets.QWidget):
         self.minSpinBox.setKeyboardTracking(False)
         self.minSpinBox.valueChanged.connect(self._spinBoxValueChanged)
         #
-        self.minContrastSlider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        # self.minContrastSlider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.minContrastSlider = DoubleSlider(QtCore.Qt.Horizontal)
         self.minContrastSlider.setMinimum(_minContrast)
         self.minContrastSlider.setMaximum(maxVal)
         self.minContrastSlider.setValue(_minContrast)
-        self.minContrastSlider.valueChanged.connect(self._sliderValueChanged)
+        # self.minContrastSlider.valueChanged.connect(self._sliderValueChanged)
+        self.minContrastSlider.doubleValueChanged.connect(self._sliderValueChanged)
 
         row = 0
         col = 0
@@ -202,11 +280,13 @@ class _histogram(QtWidgets.QWidget):
         self.maxSpinBox.setKeyboardTracking(False)
         self.maxSpinBox.valueChanged.connect(self._spinBoxValueChanged)
         #
-        self.maxContrastSlider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        #self.maxContrastSlider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.maxContrastSlider = DoubleSlider(QtCore.Qt.Horizontal)
         self.maxContrastSlider.setMinimum(minVal)
         self.maxContrastSlider.setMaximum(maxVal)
         self.maxContrastSlider.setValue(_maxContrast)
         self.maxContrastSlider.valueChanged.connect(self._sliderValueChanged)
+        self.maxContrastSlider.doubleValueChanged.connect(self._sliderValueChanged)
 
         row += 1
         col = 0
@@ -328,7 +408,10 @@ class bHistogramWidget(QtWidgets.QWidget):
 
         self.slot_setSlice(self._sliceNumber)
 
-    def slot_setData(self, imgData : np.ndarray, name : str = '', colorName : str = None):
+    def slot_setData(self, imgData : np.ndarray,
+                        name : str = '',
+                        colorName : str = None,
+                        contrast_limits : List[int] = None):
         """
 
         Args:
@@ -344,7 +427,7 @@ class bHistogramWidget(QtWidgets.QWidget):
         #     self._contrastDict[self._channel]['colorLUT'] = colorName
 
         for _hist in self.histWidgetList:
-            _hist.slot_setData(imgData, colorName=colorName)
+            _hist.slot_setData(imgData, colorName=colorName, contrast_limits=contrast_limits)
         
         self._titleLabel.setText(name)
 
@@ -440,6 +523,11 @@ class bHistogramWidget(QtWidgets.QWidget):
         Args:
             contrastDict: dictionary for one channel.
         """
+        
+        # add title. our _histograms don't know title
+        # used to match a selected napari layer
+        contrastDict['title'] = self._title
+        
         self.signalContrastChange.emit(contrastDict)
         
         minMaxList = [
@@ -593,5 +681,6 @@ class bHistogramWidget(QtWidgets.QWidget):
 
 def checkHist():
     pass
+
 if __name__ == '__main__':
     checkHist()
