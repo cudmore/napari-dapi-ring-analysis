@@ -7,7 +7,65 @@ import numpy as np
 
 from skimage.filters import threshold_otsu, gaussian
 
+from aicssegmentation.core.vessel import filament_2d_wrapper
+from aicssegmentation.core.pre_processing_utils import intensity_normalization, image_smoothing_gaussian_3d, edge_preserving_smoothing_3d
+from aicssegmentation.core.pre_processing_utils import suggest_normalization_param
+from skimage.morphology import remove_small_objects     # function for post-processing (size filter)
+
 from napari_dapi_ring_analysis._logger import logger
+
+def aicsSuggestedNorm(imgData):
+    """Ask aics how to normalize an image to define
+        parameter xxx.
+    """
+    return suggest_normalization_param(imgData)
+
+def aicsSegment(imgData : np.ndarray,
+        # intensity_scaling_param = [3.5, 15],
+        intensity_scaling_param = [1, 17],
+        gaussian_smoothing_sigma = 1,
+        f2_param = [[1.25, 0.16], [2.5, 0.16/2]],
+        minArea = 5,
+        ):
+    """Segment Oligo stack with aics tomm20 workflow
+    
+    Args:
+        intensity_scaling_param:
+        gaussian_smoothing_sigma:
+        f2_param:
+
+    Try this on imgData:
+        from aicssegmentation.core.pre_processing_utils import suggest_normalization_param
+        suggest_normalization_param(struct_img0)
+
+    Returns:
+        dict: keys are np.ndarray with intermediate steps
+    """
+
+    # intensity normalization
+    imgNorm = intensity_normalization(imgData, scaling_param=intensity_scaling_param)
+
+    # smoothing with 2d gaussian filter slice by slice 
+    imgSmooth = image_smoothing_gaussian_3d(imgNorm, sigma=gaussian_smoothing_sigma)
+
+    # filament filter
+    imgFilament = filament_2d_wrapper(imgSmooth, f2_param)
+
+    imgRemoveSmall = remove_small_objects(imgFilament>0, min_size=minArea,
+                                                connectivity=1, in_place=False)
+
+    # Or, edge-preserving smoothing
+    # imgSmooth = edge_preserving_smoothing_3d(imgNorm)
+
+    retDict = {
+        'imgData': imgData,
+        'imgNorm': imgNorm,
+        'imgSmooth': imgSmooth, 
+        'imgFilament': imgFilament,
+        'imgRemoveSmall': imgRemoveSmall,
+    }
+
+    return retDict
 
 def getOtsuThreshold(imgData : np.ndarray, sigma):
     """

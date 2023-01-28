@@ -26,17 +26,35 @@ def batchMakeAnalysis(folderPathList, cytoSigma: float = 0.7):
 
         files = dfFolder['file'].values
         # dictList = []
-        for file in files:
+        for _fileIdx, file in enumerate(files):
+            
+            # full path to file
+            file = os.path.join(folderPath, file)
+            
+            print(f'    === file {_fileIdx+1} of {len(files)}')
+            print(f'    === file {file}')
+
             # files = dfFolder['']
             oa = oaf.getOligoAnalysis(file)
 
-            dapiImg = oa.getImageChannel(dra.imageChannels.dapi)
+            # run aics segmentation (fills in aics % in header)
+            oa.aicsAnalysis()
+
+            # grab cellpose mask and count number of labels
+            _cellPoseMask = oa.getCellPoseMask()
+            if _cellPoseMask is not None:
+                # need to update the table
+                oa._header['num labels'] = len(np.unique(_cellPoseMask))
+            else:
+                oa._header['num labels'] = float('nan')
+
+            dapiImg = oa.getImageChannel(dra.imageChannels.dapi, rawCzi=True)
             # dapiMin = np.min(dapiImg)
             # dapiMax = np.max(dapiImg)
             # dapiRange = dapiMax - dapiMin
 
             # bring cyto gaussian down to 0.7
-            cytoImg = oa.getImageChannel(dra.imageChannels.cyto)
+            cytoImg = oa.getImageChannel(dra.imageChannels.cyto, rawCzi=True)
             # cytoMin = np.min(cytoImg)
             # cytoMax = np.max(cytoImg)
             # cytoRange = cytoMax - cytoMin
@@ -55,6 +73,9 @@ def batchMakeAnalysis(folderPathList, cytoSigma: float = 0.7):
 
             oa._header['cytoDapiRatio'] = oa._header['cytoMaskPercent'] / oa._header['dapiMaskPercent']
 
+            # unload raw data
+            oa.unloadRawData()
+
         _dfFolder = oaf.getAnalysisDataFrame()
         
         # Christine analysis
@@ -67,7 +88,14 @@ def batchMakeAnalysis(folderPathList, cytoSigma: float = 0.7):
         # save to one csv
         # savePath = '/Users/cudmore/Dropbox/data/whistler/cudmore/oligo-simmary-20221214-v2.csv'
         # savePath = '/Users/cudmore/Dropbox/data/whistler/cudmore/oligo-simmary-20230111-saline.csv'
-        savePath = f'/Users/cudmore/Dropbox/data/whistler/cudmore/oligo-simmary-20230112-cs-{cytoSigma}.csv'
+        #savePath = f'/Users/cudmore/Dropbox/data/whistler/cudmore/oligo-simmary-20230112-cs-{cytoSigma}.csv'
+        
+        # adding new aics analysis
+        # savePath = f'/media/cudmore/data/Dropbox/data/whistler/cudmore/oligo-summary-20230121-cs-{cytoSigma}-v3.csv'
+
+        savePath = f'/media/cudmore/data/Dropbox/data/whistler/cudmore/oligo-summary-20230123-Saline-{cytoSigma}-v3.csv'
+
+        
         logger.info(f'saving to: {savePath}')
         dfMaster.to_csv(savePath)
 
@@ -79,18 +107,37 @@ if __name__ == '__main__':
     
     # NEED TO RUN _cellpose.batchRunFolder0() FIRST !!!!!
 
+    _rootPath = '/media/cudmore/data/Dropbox/data/whistler/cudmore/'
+
     folderPathList = [
-        '/Users/cudmore/Dropbox/data/whistler/cudmore/20221010/FST',
-        '/Users/cudmore/Dropbox/data/whistler/cudmore/20221010/Morphine',
+        _rootPath + '20221010/FST',
+        _rootPath + '20221010/Morphine',
 
-        '/Users/cudmore/Dropbox/data/whistler/cudmore/20221031/FST',
-        '/Users/cudmore/Dropbox/data/whistler/cudmore/20221031/Morphine',
+        _rootPath + '20221031/FST',
+        _rootPath + '20221031/Morphine',
 
-        '/Users/cudmore/Dropbox/data/whistler/cudmore/20221109/Adolescent',
-        '/Users/cudmore/Dropbox/data/whistler/cudmore/20221109/Saline',
+        _rootPath + '20221109/Adolescent',
+        _rootPath + '20221109/Saline',
 
-        '/Users/cudmore/Dropbox/data/whistler/cudmore/20221216/Saline'
+        _rootPath + '20221216/Saline',
 
+        _rootPath + '20230123/Saline',
+
+        # '/Users/cudmore/Dropbox/data/whistler/cudmore/20221010/FST',
+        # '/Users/cudmore/Dropbox/data/whistler/cudmore/20221010/Morphine',
+
+        # '/Users/cudmore/Dropbox/data/whistler/cudmore/20221031/FST',
+        # '/Users/cudmore/Dropbox/data/whistler/cudmore/20221031/Morphine',
+
+        # '/Users/cudmore/Dropbox/data/whistler/cudmore/20221109/Adolescent',
+        # '/Users/cudmore/Dropbox/data/whistler/cudmore/20221109/Saline',
+
+        # '/Users/cudmore/Dropbox/data/whistler/cudmore/20221216/Saline'
+
+    ]
+
+    folderPathList = [
+        _rootPath + '20230123/Saline',
     ]
 
     # folderPathList = [
@@ -100,7 +147,7 @@ if __name__ == '__main__':
     #     '/Users/cudmore/Dropbox/data/whistler/cudmore/20221216/Saline',
     # ]
 
-    batchMakeAnalysis(folderPathList, cytoSigma = 0.4)
+    # batchMakeAnalysis(folderPathList, cytoSigma = 0.4)
     batchMakeAnalysis(folderPathList, cytoSigma = 0.7)
-    batchMakeAnalysis(folderPathList, cytoSigma = 1.0)
+    # batchMakeAnalysis(folderPathList, cytoSigma = 1.0)
     

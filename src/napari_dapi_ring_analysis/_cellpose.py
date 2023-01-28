@@ -3,6 +3,7 @@ Run cellpose on 3d rgb stacks and save _seg.npy file
 """
 import os
 import sys
+import json
 import pathlib
 import tifffile
 
@@ -12,6 +13,8 @@ from cellpose import models
 from cellpose import utils, io
 
 from cellpose.io import logger_setup
+
+from aicssegmentation.core.pre_processing_utils import intensity_normalization, image_smoothing_gaussian_3d, edge_preserving_smoothing_3d
 
 #import oligoanalysis
 from napari_dapi_ring_analysis import oligoAnalysisFolder
@@ -60,6 +63,10 @@ def runModelOnImage(imgPath : str, imgData : np.ndarray = None, setupLogger=True
         imgPath: full path to 3D rgb stack
         imgData: image data for 3D rgb stack
         setupLogger: if True will re-init logger in <user>/.cellpose/run.log
+
+    Output (saved)
+        -cp,json with model parameters
+        -seg.npy with cellpose output (mask is in there, it is hdf5 file)
     """
     
     # setup cellpose logging to file
@@ -75,50 +82,18 @@ def runModelOnImage(imgPath : str, imgData : np.ndarray = None, setupLogger=True
     logger.info(f'  {imgPath}')  # (7, 196, 196, 3)
     
     # shape is (slices, x, y, rgb)
-    logger.info(f'  {imgData.shape}')  # (7, 196, 196, 3)
+    logger.info(f'  imgData: {imgData.shape} max:{np.max(imgData)}')  # (7, 196, 196, 3)
 
-    # gaussian filter each rgb channel???
-    '''
-    from skimage.filters import threshold_otsu, gaussian
-    from scipy.signal import medfilt
-    doGauss = True
-    _sigma = [0.5, 0.8, 0.8]
-    _kernel_size = [1,3,3]
-    logger.info(f'XXX blurring with gaussian/median to see if we get fewer labels')
-    logger.info(f'    _sigma:{_sigma}')
-    logger.info(f'    _kernel_size:{_kernel_size}')
+    # try to pre-scale, bacause I trained on rgb, this does not work
+    # _imgDataGray = imgData[:,:,:,2]  # assuming 2 is dapi channel
 
+    # intensity_scaling_param = [1, 17]
+    # _imgDataGray = intensity_normalization(_imgDataGray, scaling_param=intensity_scaling_param)
+    # logger.info(f'_imgDataGray:')
+    # logger.info(f'  intensity_scaling_param: {intensity_scaling_param}')
+    # logger.info(f'  {_imgDataGray.shape} max:{np.max(_imgDataGray)}')
 
-    rgbChannels = imgData.shape[3]  # 3
-    for rgbChannelIdx in range(rgbChannels):
-        _oneChannel = imgData[:,:,:,rgbChannelIdx]
-        #logger.info(f'    _onceChannel:{_oneChannel.shape}')
-
-        if doGauss:
-            _gausFilter = gaussian(_oneChannel, sigma=_sigma)  # float64
-        else:
-            _gausFilter = medfilt(_oneChannel, kernel_size=_kernel_size)  # uint8
-
-        logger.info(f'  idx:{rgbChannelIdx} _gausFilter:{_gausFilter.shape} {_gausFilter.dtype}')
-        logger.info(f'      min:{np.min(_gausFilter)} max:{np.max(_gausFilter)}')
-
-        # convert back to 8-bit
-        # _gausFilter = _gausFilter / 2**32  # gaus returns float64
-        # _gausFilter = _gausFilter.astype(np.uint8)
-
-        # this will maximize range (might not be good)
-        if doGauss:
-            _gausFilter = _gausFilter / np.max(_gausFilter) * 255
-            _gausFilter = _gausFilter.astype(np.uint8)        
-
-        logger.info(f'    2 _gausFilter:{_gausFilter.shape} {_gausFilter.dtype}')
-        logger.info(f'      min:{np.min(_gausFilter)} max:{np.max(_gausFilter)}')
-        imgData[:,:,:,rgbChannelIdx] = _gausFilter
-    '''
-
-    #sys.exit(1)
-
-    gpu = False
+    gpu = True
     model_type = None  # 'cyto' or 'nuclei' or 'cyto2'
     
     pretrained_models = getModels()
@@ -126,58 +101,84 @@ def runModelOnImage(imgPath : str, imgData : np.ndarray = None, setupLogger=True
         logger.warning('Did not find any models, cellpose is not running')
         return
 
-    print('pretrained_models:')
-    print(pretrained_models)
-    pretrained_model = pretrained_models[1]  # '/Users/cudmore/Sites/oligo-analysis/models/CP_20221008_110626'
+    # logger.info('pretrained_models:')
+    # print('  ', pretrained_models)
+
+    #pretrained_model = pretrained_models[1]  # '/Users/cudmore/Sites/oligo-analysis/models/CP_20221008_110626'
+
     # made new model at sfn CP_20221115_123812
+    #pretrained_model = pretrained_models[2]  # '/Users/cudmore/Sites/oligo-analysis/models/CP_20221008_110626'
 
-    channels = [[2,1]]  # # grayscale=0, R=1, G=2, B=3
-    
-    diameter = 30 # 20 # 16.0
+    pretrained_model = pretrained_models[3]  # '/Users/cudmore/Sites/oligo-analysis/models/CP_20221008_110626'
 
-    # was this for last run of model - SFN
-    diameter = 16 # 20 # 16.0
+    #channels = [[2,1]]  # # grayscale=0, R=1, G=2, B=3
+    channels = [[2,2]]  # # grayscale=0, R=1, G=2, B=3
+    #channels = [[0,0]]  # # grayscale=0, R=1, G=2, B=3  # when using _imgDataGray
     
-    flow_threshold = 0.8  # default is 0.4
+    diameter = 30 #28 # cellpose default is 30
+    
+    flow_threshold = 1.0  # default is 0.4 (ignored when using anisotropy)
+    cellprob_threshold = -5  #-2  #-2  # [-6,6], lower number includes more
+
+    anisotropy = 10  # ignores flow_threshold, z / xy um/pixel
+    min_size = 380 # if not specified default to 15
+    #min_size = -1  # to turn off
 
     do_3D = True
-    net_avg = False
+    #net_avg = False
 
-    # run model
-    # masks, flows, styles, diams = model.eval(imgData,
-    #                                 diameter=diameter, channels=channels,
-    #                                 do_3D=do_3D)
+    cellPoseDict = {
+        'pretrained_model': os.path.split(pretrained_model)[1],
+        'channels': channels,
+        'diameter': diameter,
+        'flow_threshold': flow_threshold,
+        'cellprob_threshold': cellprob_threshold,
+        'anisotropy': anisotropy,
+        'min_size': min_size,
+        'do_3D': do_3D,
+        #'net_avg': net_avg,
+    }
 
     logger.info(f'  instantiating model with models.CellposeModel()')
     logger.info(f'    gpu: {gpu}')
     logger.info(f'    model_type: {model_type}')
     logger.info(f'    pretrained_model: {pretrained_model}')
-    logger.info(f'    net_avg: {net_avg}')
+    #logger.info(f'    net_avg: {net_avg}')
 
     model = models.CellposeModel(gpu=gpu, model_type=model_type,
-                                    pretrained_model=pretrained_model,
-                                    net_avg=net_avg)
+                                    pretrained_model=pretrained_model)
 
     logger.info('  running model.eval')
     logger.info(f'    diameter: {diameter}')
     logger.info(f'    flow_threshold: {flow_threshold}')
+    logger.info(f'    cellprob_threshold: {cellprob_threshold}')
     logger.info(f'    channels: {channels}')
     logger.info(f'    do_3D: {do_3D}')
+
 
     # jan2023, flow_threshold = 0.4
     # try 0.8
     masks, flows, styles = model.eval(imgData,
                                         diameter=diameter,
                                         flow_threshold=flow_threshold,  # added jan2023
+                                        cellprob_threshold=cellprob_threshold,
                                         channels=channels,
-                                        do_3D=do_3D
-                                        )
+                                        do_3D=do_3D,
+                                        anisotropy=anisotropy,
+                                        min_size=min_size)
 
     # save
     logger.info(f'  saving cellpose _seg.npy into folder {os.path.split(imgPath)[0]}')
     # models.CellposeModel.eval does not return 'diams', using diameter
     io.masks_flows_to_seg(imgData, masks, flows, diameter, imgPath, channels)
     
+    # save parameters
+    paramPath = os.path.splitext(imgPath)[0]
+    paramPath = paramPath + '-cp.json'
+    logger.info(f'  saving cellpose params to {paramPath}')
+    with open(paramPath, "w") as jsonOutfile:
+        json.dump(cellPoseDict, jsonOutfile, indent=4)
+
     logger.info(f'  >>> DONE running cellpose on pre-trained model "{os.path.split(pretrained_model)[1]}" for file "{os.path.split(imgPath)[1]}"')
 
     # can't save 3d output as png
@@ -186,20 +187,25 @@ def runModelOnImage(imgPath : str, imgData : np.ndarray = None, setupLogger=True
 def batchRunFolder0():
     """run a cellpose model on entire folders of czi rgb stack
     """
+    _rootPath = '/media/cudmore/data/Dropbox/data/whistler/'
+    
     folderPathList = [
-        '/Users/cudmore/Dropbox/data/whistler/cudmore/20221010/FST',
-        '/Users/cudmore/Dropbox/data/whistler/cudmore/20221010/Morphine',
-    
-        '/Users/cudmore/Dropbox/data/whistler/cudmore/20221031/FST',
-        '/Users/cudmore/Dropbox/data/whistler/cudmore/20221031/Morphine',
-    
-        '/Users/cudmore/Dropbox/data/whistler/cudmore/20221109/Adolescent',
-        '/Users/cudmore/Dropbox/data/whistler/cudmore/20221109/Saline',
+        _rootPath + 'cudmore/20221010/FST',
+        _rootPath + 'cudmore/20221010/Morphine',
+
+        _rootPath + 'cudmore/20221031/FST',
+        _rootPath + 'cudmore/20221031/Morphine',
+
+        _rootPath + 'cudmore/20221109/Adolescent',
+        _rootPath + 'cudmore/20221109/Saline',
+
+        _rootPath + 'cudmore/20230123/Saline',
+
     ]
     
     # do one folder for debugging
     folderPathList = [
-        '/Users/cudmore/Dropbox/data/whistler/cudmore/20221010/Morphine',
+        _rootPath + 'cudmore/20230123/Saline',
     ]
 
     logger.info(f'Running on folderPathList')
@@ -235,7 +241,9 @@ def batchRunFolder(folderPath : str):
         logger.info('\n')
         logger.info(f'=== {idx}/{len(files)-1} Fetching oligo analysis for file {file}')
         
-        oa = oaf.getOligoAnalysis(file, loadImages=False)
+        filePath = os.path.join(folderPath, file)
+        
+        oa = oaf.getOligoAnalysis(filePath, loadImages=False)
         
         rgbStackPath = oa._getRgbPath()
         
@@ -254,7 +262,7 @@ def batchRunFolder(folderPath : str):
         # TODO: unload oligoAnalysis
         oa = None  # does this free memory ?
 
-def saveSlices():
+def saveSlicesForCellPose():
     """Open a 3d rgb and save the 2-channel slices
         Each slice will be rgb 8-bit without histogram normalization
     
@@ -262,8 +270,13 @@ def saveSlices():
          - draw rois
          - train
     """
-    folderPath = '/Users/cudmore/Dropbox/data/whistler/data-oct-10/FST'
     
+    # up until jan 21 2023, this is the training set I was using
+    #folderPath = '/Users/cudmore/Dropbox/data/whistler/data-oct-10/FST'
+    
+    # new jan 2023
+    folderPath = '/media/cudmore/data/Dropbox/data/whistler/cudmore/20221010/Morphine'
+
     # folder to save all the slices in
     _, _folderName = os.path.split(folderPath)
     savePath = os.path.join(folderPath, f'{_folderName}_rgbSlices')
@@ -278,8 +291,14 @@ def saveSlices():
     
     for idx, file in enumerate(files):
         # file is czi file
+        file = os.path.join(folderPath, file)
+
+        if not os.path.isfile(file):
+            logger.error('did not find file: {file}')
+            sys.exit(1)
+
         logger.info('\n')
-        logger.info(f'=== {idx}/{len(files)-1} Fetching oligo analysis for file {file}')
+        logger.info(f'=== {idx+1}/{len(files)} Fetching oligo analysis for file {file}')
         
         oa = oaf.getOligoAnalysis(file, loadImages=False)
         
@@ -297,14 +316,14 @@ def saveSlices():
             oneSlice = rgbStack[_sliceNum, :, :, :]
             print(' . slicePath:', slicePath)
             
-            tifffile.imsave(slicePath, oneSlice)
+            #tifffile.imsave(slicePath, oneSlice)
 
             masterSliceNumber += 1
 
 if __name__ == '__main__':
     
     # save a folder of czi rgb to slices (to be opened in cellpose gui)
-    # saveSlices()
+    # saveSlicesForCellPose()
     # sys.exit(1)
 
     # path = '/Users/cudmore/Dropbox/data/whistler/data-oct-10/FST/FST-analysis/B35_Slice2_RS_DS1.czi/B35_Slice2_RS_DS1-rgb-small.tif'

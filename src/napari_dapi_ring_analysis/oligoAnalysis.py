@@ -46,6 +46,8 @@ class oligoAnalysis():
         self._path : str = path
         # full path to raw image file (czi file)
 
+        self._imgDataCzi = None # for raw czi images
+
         # default header
         # load header from raw image stack (czi)
         self._header : dict = _loadHeader(path)
@@ -114,6 +116,75 @@ class oligoAnalysis():
 
         self._isLoaded = False
         # True if raw images have been loaded, see load()
+
+    def aicsAnalysis(self):
+
+        logger.info('calculating aics segmentation and storing results in _header')
+        
+        # this is the 4x reduced version
+        #imgData = self.getImageChannel(imageChannels.cyto)
+        
+        # load raw czi
+        self._loadCzi()
+        imgData = self._imgDataCzi[1]
+
+        _suggestedNorm = oligoUtils.aicsSuggestedNorm(imgData)
+        logger.info(f'_suggestedNorm: {_suggestedNorm}')
+
+        
+        # analyze (lots of default params)
+        retDict = oligoUtils.aicsSegment(imgData)
+
+        self._aicsDict = retDict
+
+        # calculate pixel stats
+        _finalMask = self._aicsDict['imgRemoveSmall']
+        
+        numStackPixels = _finalMask.size
+        numMaskPixels = np.count_nonzero(_finalMask)
+        maskPercent = numMaskPixels / numStackPixels * 100
+        
+        logger.info(f'  -- RESULTS: maskPercent:{maskPercent}')
+
+        self._header[f'aicsMaskPixels'] = numMaskPixels
+        self._header[f'aicsMaskPercent'] = maskPercent
+        
+
+    def _loadCzi(self):
+        """Load raw czi into self._imgDataCzi : dict with key of channel [1, 2]
+        """
+        logger.info(f'{self._path}')
+
+        if self._imgDataCzi is None:
+            logger.info('  loading')
+            img = AICSImage(self._path)
+            imgData = img.get_image_data("ZYXC", T=0)
+            # imgData is like: (21, 784, 784, 2)
+            logger.info(f'  AICSImage loaded raw imgData: {imgData.shape} {imgData.dtype}')
+
+            # convert to 8 bit, we need to do each channel to maximize histogram
+            imgData_ch1 = imgData[:,:,:,0]
+            imgData_ch2 = imgData[:,:,:,1]
+
+            self._imgDataCzi = {}
+            self._imgDataCzi[1] = imgData_ch1
+            self._imgDataCzi[2] = imgData_ch2
+        else:
+            logger.info('  already loaded into _imgDataCzi')
+
+    def unloadRawData(self):
+        """Unload all raw data
+        """
+        self._redImageMask = None
+        self._redImageFiltered = None
+        self._greenImageMask = None
+        self._greenImageFiltered = None
+        
+        self._cellPoseMask = None
+        self._dapiFinalMask = None
+
+        # raw czi
+        self._imgDataCzi = None
 
     def setLabelRowAccept(self, rowList : List[int], df : pd.DataFrame):
         """
@@ -439,7 +510,7 @@ class oligoAnalysis():
         filteredPath += f'-filtered-{imageChannel.value}.tif'
         return filteredPath
 
-    def getImageChannel(self, imageChannel : imageChannels) -> np.ndarray:
+    def getImageChannel(self, imageChannel : imageChannels, rawCzi = False) -> np.ndarray:
         """Get an image (color) channel from rgb stack.
         
         Args:
@@ -448,9 +519,17 @@ class oligoAnalysis():
         Assuming rgb stack has channel order (slice, y, x, channel)
         """
         if imageChannel == imageChannels.cyto:
-            return self._rgbStack[:, :, :, self.cytoChannel]  # 0
+            if rawCzi:
+                self._loadCzi()  # load if necc
+                return self._imgDataCzi[1]
+            else:
+                return self._rgbStack[:, :, :, self.cytoChannel]  # 0
         if imageChannel == imageChannels.dapi:
-            return self._rgbStack[:, :, :, self.dapiChannel]  # 1
+            if rawCzi:
+                self._loadCzi()  # load if necc
+                return self._imgDataCzi[2]
+            else:
+                return self._rgbStack[:, :, :, self.dapiChannel]  # 1
 
     def _getRgbStack(self, forceMake=False) -> np.ndarray:
         """Load or make an rgb stack from raw file.
@@ -589,7 +668,9 @@ class oligoAnalysis():
         Assigns:
             self._redImageMask
         """
-        imgData = self.getImageChannel(imageChannel)
+        
+        imgData = self.getImageChannel(imageChannel, rawCzi=False)
+        #imgData = self.getImageChannel(imageChannel, rawCzi=True)
 
         if gaussianSigma is None:
             gaussianSigma = self._header['gaussianSigma']

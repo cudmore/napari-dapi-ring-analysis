@@ -8,7 +8,14 @@ aicspylibczi
 cellpose
 pyqtgraph
 
+scikit-image
+
 matplotlib
 mplcursors
 seaborn
+plotly
+
+aicssegmentation
+
+statannotations
 

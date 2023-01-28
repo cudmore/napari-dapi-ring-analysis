@@ -184,6 +184,7 @@ class _histogram(QtWidgets.QWidget):
         _imageMedian = np.median(self._sliceImage)
         self.pgPlotWidget.setXRange(_imageMin, self._maxValue, padding=0)
 
+        # TODO: jan2023 'TypeError: type numpy.bool_ doesn't define __round__ method'
         _imageMin = round(_imageMin, 3)
         _imageMax = round(_imageMax, 3)
         _imageMedian = round(_imageMedian, 3)

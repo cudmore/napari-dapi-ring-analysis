@@ -76,6 +76,7 @@ class oligoAnalysisFolder():
             _paths = self._dfFolder['path'].tolist()
             for _path in _paths:
                 _path = os.path.join(self._folderPath, _path)
+                logger.info(f' analysis key is _path: {_path}')
                 self._analysisList[_path] = oligoAnalysis(_path)
             logger.info(f'Loaded {len(_paths)} oligoAnalysis files.')
 
@@ -134,6 +135,10 @@ class oligoAnalysisFolder():
                 oa.load()
             #logger.info(f'  returning: {oa}')
             return oa
+        else:
+            logger.error(f'did not find filepath: {filepath}') 
+            logger.error(f'  in keys: {self._analysisList.keys()}')
+
         # else:
         #     # NOT TAKEN
         #     filePath = os.path.join(self._folderPath, file)

@@ -54,7 +54,7 @@ def loadFolder(folderPath : str) -> pd.DataFrame:
         #header = loadCziHeader(filePath)
         header = _loadHeader(filePath)
         
-        # path is stup based on folderPath
+        # path is stub based on folderPath
         header['path'] = header['path'].replace(folderPath + '/', '')
 
         #zPixels = header['zPixels']
